@@ -1,22 +1,24 @@
-from googleapiclient.discovery import build
+import langid
+import json
 import pandas as pd
 import Levenshtein
+import time
+import numpy as np
+import random
+import networkx as nx
+import sqlite3
+import math
+import io
+from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
 from datetime import datetime
 from fuzzywuzzy import fuzz
 from urllib.parse import urlparse
 from tld import get_tld
-import langid
-import json
-import numpy as np
-import networkx as nx
 from networkx.algorithms import community
-import sqlite3
-import math
-import io
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from matplotlib import cm
-import random
 
 
 def language_detection(str_lan):
@@ -86,6 +88,7 @@ def node_postion(one_com, scale=1, center=(0, 0), dim=2):
 
 
 def getClustersWithPlotting(DATABASE, SERP_TABLE, CLUSTER_TABLE, TIMESTAMP="max"):
+    print("Starting getClustersWithPlotting function...")
     dateTimeObj = datetime.now()
     options = {'font_family': 'serif', 'font_size': '12', 'font_color': '#000000'}
     connection = sqlite3.connect(DATABASE)
@@ -95,6 +98,7 @@ def getClustersWithPlotting(DATABASE, SERP_TABLE, CLUSTER_TABLE, TIMESTAMP="max"
             connection)
     else:
         df = pd.read_sql(f'select * from {SERP_TABLE} where requestTimestamp="{TIMESTAMP}"', connection)
+    print("Data loaded successfully...")
     G = nx.Graph()
     # add graph nodes from dataframe columun
     G.add_nodes_from(df['searchTerms'])
@@ -103,10 +107,12 @@ def getClustersWithPlotting(DATABASE, SERP_TABLE, CLUSTER_TABLE, TIMESTAMP="max"
         df_link = df[df["link"] == row["link"]]
         for index1, row1 in df_link.iterrows():
             G.add_edge(row["searchTerms"], row1['searchTerms'])
+    print("Graph created successfully...")
 
     # community detection
     com = community.greedy_modularity_communities(G)
     num_com = len(com)
+    print(f"Number of communities: {num_com}")
 
     clusters_list = []
     for val in range(num_com):
@@ -116,7 +122,7 @@ def getClustersWithPlotting(DATABASE, SERP_TABLE, CLUSTER_TABLE, TIMESTAMP="max"
     connection = sqlite3.connect(DATABASE)
     df_clusters.to_sql(name=CLUSTER_TABLE, index=False, if_exists="append", dtype={"requestTimestamp": "DateTime"},
                        con=connection)
-
+    print("Clusters saved successfully...")
     # find intra_com links
     intra_links = {}
     for i in range(num_com):
@@ -153,6 +159,7 @@ def getClustersWithPlotting(DATABASE, SERP_TABLE, CLUSTER_TABLE, TIMESTAMP="max"
     plt.axis("off")
     plt.savefig('keyword_community.png', format='png', dpi=150)
     plt.show()
+    print("End of getClustersWithPlotting function...")
 
 
 def getSearchResult(filename, hl, gl, my_api_key, my_cse_id, DATABASE, TABLE):
@@ -160,47 +167,77 @@ def getSearchResult(filename, hl, gl, my_api_key, my_cse_id, DATABASE, TABLE):
     rows_to_insert = []
     keyword_df = pd.read_csv(filename)
     keywords = keyword_df.iloc[:, 0].tolist()
+    print(f"Number of keywords: {len(keywords)}")
     for query in keywords:
-        if hl == "default":
-            result = google_search_default_language(query, my_api_key, my_cse_id, gl)
-        else:
-            result = google_search(query, my_api_key, my_cse_id, hl, gl)
+        while True:
+            try:
+                print(f"Searching for keyword: {query}")
+                if hl == "default":
+                    result = google_search_default_language(query, my_api_key, my_cse_id, gl)
+                else:
+                    result = google_search(query, my_api_key, my_cse_id, hl, gl)
 
-        if "items" in result and "queries" in result:
-            for position in range(0, len(result["items"])):
-                result["items"][position]["position"] = position + 1
-                result["items"][position]["main_domain"] = extract_mainDomain(result["items"][position]["link"])
-                result["items"][position]["title_matchScore_token"] = fuzzy_token_set_ratio(
-                    result["items"][position]["title"], query)
-                result["items"][position]["snippet_matchScore_token"] = fuzzy_token_set_ratio(
-                    result["items"][position]["snippet"], query)
-                result["items"][position]["title_matchScore_order"] = fuzzy_ratio(result["items"][position]["title"],
-                                                                                  query)
-                result["items"][position]["snippet_matchScore_order"] = fuzzy_ratio(
-                    result["items"][position]["snippet"], query)
-                result["items"][position]["snipped_language"] = language_detection(result["items"][position]["snippet"])
+                if isinstance(result, HttpError):
+                    print(f"HTTP error occurred: {result}")
+                    break
 
-            for position in range(0, len(result["items"])):
-                rows_to_insert.append({"requestTimestamp": dateTimeObj, "searchTerms": query, "gl": gl, "hl": hl,
-                                       "totalResults": result["queries"]["request"][0]["totalResults"],
-                                       "link": result["items"][position]["link"],
-                                       "displayLink": result["items"][position]["displayLink"],
-                                       "main_domain": result["items"][position]["main_domain"],
-                                       "position": result["items"][position]["position"],
-                                       "snippet": result["items"][position]["snippet"],
-                                       "snipped_language": result["items"][position]["snipped_language"],
-                                       "snippet_matchScore_order": result["items"][position][
-                                           "snippet_matchScore_order"],
-                                       "snippet_matchScore_token": result["items"][position][
-                                           "snippet_matchScore_token"], "title": result["items"][position]["title"],
-                                       "title_matchScore_order": result["items"][position]["title_matchScore_order"],
-                                       "title_matchScore_token": result["items"][position]["title_matchScore_token"],
-                                       })
+                print(f"Number of search results: {len(result['items']) if 'items' in result else 0}")
+                if "items" in result and "queries" in result:
+                    for position in range(0, len(result["items"])):
+                        result["items"][position]["position"] = position + 1
+                        result["items"][position]["main_domain"] = extract_mainDomain(result["items"][position]["link"])
+                        result["items"][position]["title_matchScore_token"] = fuzzy_token_set_ratio(
+                            result["items"][position]["title"], query)
+
+                        if "snippet" in result["items"][position]:  # check if 'snippet' is in the dictionary
+                            result["items"][position]["snippet_matchScore_token"] = fuzzy_token_set_ratio(
+                                result["items"][position]["snippet"], query)
+                            result["items"][position]["snippet_matchScore_order"] = fuzzy_ratio(
+                                result["items"][position]["snippet"], query)
+                            result["items"][position]["snipped_language"] = language_detection(
+                                result["items"][position]["snippet"])
+                        else:
+                            result["items"][position]["snippet_matchScore_token"] = None
+                            result["items"][position]["snippet_matchScore_order"] = None
+                            result["items"][position]["snipped_language"] = None
+
+                    rows_to_insert.append({
+                        "requestTimestamp": dateTimeObj,
+                        "searchTerms": query,
+                        "gl": gl,
+                        "hl": hl,
+                        "totalResults": result["queries"]["request"][0]["totalResults"],
+                        "link": result["items"][position]["link"],
+                        "displayLink": result["items"][position]["displayLink"],
+                        "main_domain": result["items"][position]["main_domain"],
+                        "position": result["items"][position]["position"],
+                        "snippet": result["items"][position]["snippet"] if "snippet" in result["items"][
+                            position] else None,
+                        "snipped_language": result["items"][position]["snipped_language"],
+                        "snippet_matchScore_order": result["items"][position]["snippet_matchScore_order"],
+                        "snippet_matchScore_token": result["items"][position]["snippet_matchScore_token"],
+                        "title": result["items"][position]["title"],
+                        "title_matchScore_order": result["items"][position][
+                            "title_matchScore_order"] if "title_matchScore_order" in result["items"][
+                            position] else None,
+                        "title_matchScore_token": result["items"][position]["title_matchScore_token"],
+                    })
+
+
+            except HttpError as error:
+                if error.resp.status == 429:
+                    print("Rate limit exceeded. Waiting for 60 seconds.")
+                    time.sleep(60)
+                    continue
+                else:
+                    raise
+            break
 
     df = pd.DataFrame(rows_to_insert)
     # save serp results to sqlite database
     connection = sqlite3.connect(DATABASE)
     df.to_sql(name=TABLE, index=False, if_exists="append", dtype={"requestTimestamp": "DateTime"}, con=connection)
+    print(f"Saved search results for all keywords.")
 
 
 ##############################################################################################################################################
@@ -224,21 +261,21 @@ def getSearchResult(filename, hl, gl, my_api_key, my_cse_id, DATABASE, TABLE):
 ##############################################################################################################################################
 
 # csv file name that have keywords for serp
-CSV_FILE = "keywords.csv"
+CSV_FILE = "keywords2.csv"
 # determine language
 LANGUAGE = "en"
 # detrmine country
 COUNTRY = "us"
 # google custom search json api key
-API_KEY = "XXXXXX"
+API_KEY = "AIzaSyDxlYW1h5SHxp0y5iMS_dKLz4StFAZo5TQ"
 # Search engine ID
-CSE_ID = "XXXXXX"
+CSE_ID = "74fdabf378d1b478a"
 # sqlite database name
 DATABASE = "keywords.db"
 # table name to save serp results to it
 SERP_TABLE = "keywords_serps"
 # run serp for keywords
-getSearchResult(CSV_FILE, LANGUAGE, COUNTRY, API_KEY, CSE_ID, DATABASE, SERP_TABLE)
+# getSearchResult(CSV_FILE, LANGUAGE, COUNTRY, API_KEY, CSE_ID, DATABASE, SERP_TABLE)
 
 # table name that cluster results will save to it.
 CLUSTER_TABLE = "keyword_clusters"
