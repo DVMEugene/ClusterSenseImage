@@ -1,6 +1,7 @@
 import langid
 import json
 import pandas as pd
+import os
 import Levenshtein
 import time
 import numpy as np
@@ -9,6 +10,7 @@ import networkx as nx
 import sqlite3
 import math
 import io
+from dotenv import load_dotenv
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
 from datetime import datetime
@@ -259,21 +261,22 @@ def getSearchResult(filename, hl, gl, my_api_key, my_cse_id, DATABASE, TABLE):
 #                                                                                                                                            #
 # 5- Browse the results through  DB browser for Sqlite program. The clusters plot will save to keyword_community.png                          #                                                                            #
 ##############################################################################################################################################
-
+load_dotenv("./secrets/.env")
+# Search engine ID
+CSE_ID = os.getenv('SEARCH_ENGINE_ID')
+# google custom search json api key
+API_KEY = os.getenv('GOOGLE_API_KEY')
 # csv file name that have keywords for serp
 CSV_FILE = "keywords2.csv"
 # determine language
 LANGUAGE = "en"
 # detrmine country
 COUNTRY = "us"
-# google custom search json api key
-API_KEY = "AIzaSyDxlYW1h5SHxp0y5iMS_dKLz4StFAZo5TQ"
-# Search engine ID
-CSE_ID = "74fdabf378d1b478a"
 # sqlite database name
 DATABASE = "keywords.db"
 # table name to save serp results to it
 SERP_TABLE = "keywords_serps"
+
 # run serp for keywords
 # getSearchResult(CSV_FILE, LANGUAGE, COUNTRY, API_KEY, CSE_ID, DATABASE, SERP_TABLE)
 
